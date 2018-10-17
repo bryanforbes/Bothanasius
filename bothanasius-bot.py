@@ -3,11 +3,12 @@
 import asyncio
 import uvloop
 
-from botus_receptus import run
+from botus_receptus import cli
 from bothanasius import Bothanasius
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
 if __name__ == '__main__':
-    run(Bothanasius, './config.ini')
+    runner = cli(Bothanasius, './config.ini')
+    runner()

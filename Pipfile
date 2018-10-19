@@ -25,7 +25,8 @@ pytest-mock = "*"
 pytest-mypy = "*"
 ipython = "*"
 "flake8-pyi" = {editable = true, ref = "master", git = "https://github.com/ambv/flake8-pyi.git"}
-sqlalchemy-stubs = {editable = true, ref = "master", git = "https://github.com/dropbox/sqlalchemy-stubs.git"}
+sqlalchemy-stubs = {editable = true, ref = "add-sql-typings-2", git = "https://github.com/bryanforbes/sqlalchemy-stubs.git"}
+gino-stubs = {editable = true, ref = "master", git = "https://github.com/bryanforbes/gino-stubs.git"}
 
 [requires]
 python_version = "3.7"

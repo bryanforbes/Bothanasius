@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "0bb6cf22d70966a68d1e061f368528250e78cd819710c58381018ab8acbc5b57"
+            "sha256": "578f3805f38cfa141409d0be7a67e639f93fb51289fac8b4c94c93d29b92fdd2"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -482,6 +482,11 @@
             "git": "https://github.com/ambv/flake8-pyi.git",
             "ref": "a2f200dd7010a70911d7680d4db21d9da92ac51d"
         },
+        "gino-stubs": {
+            "editable": true,
+            "git": "https://github.com/bryanforbes/gino-stubs.git",
+            "ref": "bdab6ff83a8307ca5b69785afa0573a4f5180a07"
+        },
         "ipython": {
             "hashes": [
                 "sha256:47b17ea874454a5c2eacc2732b04a750d260b01ba479323155ac8a39031f5535",
@@ -669,8 +674,8 @@
         },
         "sqlalchemy-stubs": {
             "editable": true,
-            "git": "https://github.com/dropbox/sqlalchemy-stubs.git",
-            "ref": "72697d47b861acc43e047abfdfc87fb6294e0bd7"
+            "git": "https://github.com/bryanforbes/sqlalchemy-stubs.git",
+            "ref": "c73196fac06eb31b8d78b191731283d83d578d14"
         },
         "traitlets": {
             "hashes": [

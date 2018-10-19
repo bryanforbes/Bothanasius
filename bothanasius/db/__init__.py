@@ -10,16 +10,15 @@ from sqlalchemy.sql import expression
 from gino import Gino
 from gino.crud import CRUDModel
 
+db = Gino()
 
 if TYPE_CHECKING:
-    db = Gino()
     Base = CRUDModel
     IntBase = types.TypeDecorator[int]
     LtreeBase = types.UserDefinedType['Ltree']
     LQUERYBase = types.TypeEngine[str]
     LTXTQUERYBase = types.TypeEngine[str]
 else:
-    db = Gino()
     Base = db.Model
     IntBase = types.TypeDecorator
     LtreeBase = types.UserDefinedType

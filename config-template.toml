@@ -1,0 +1,12 @@
+[bot]
+bot_name = "bothanasius"
+command_prefix = "::"
+discord_api_key = "api key goes here"
+db_url = "postgresql://bothanasius:<password goes here>@localhost/bothanasius"
+# dbl_token = "bot token goes here"
+
+[bot.logging]
+# log_file = "bothanasius.log"
+
+[bot.logging.loggers]
+gino = "error"

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import discord
 from typing import List
-from . import db, Snowflake, LtreeType, Base
+from botus_receptus.gino import db, Snowflake, Base
+from . import LtreeType
 
 
 class LinkedRole(Base):
@@ -14,7 +15,7 @@ class LinkedRole(Base):
 
     __table_args__ = (
         db.UniqueConstraint('guild_id', 'role_id'),
-        db.Index('linked_roles_path_gist_idx', 'path', postgresql_using='gist')
+        db.Index('linked_roles_path_gist_idx', 'path', postgresql_using='gist'),
     )
 
 
@@ -24,19 +25,14 @@ class SelfRole(Base):
     guild_id = db.Column(Snowflake(), primary_key=True)
     role_id = db.Column(Snowflake(), primary_key=True)
 
-    __table_args__ = (
-        db.UniqueConstraint('guild_id', 'role_id'),
-    )
+    __table_args__ = (db.UniqueConstraint('guild_id', 'role_id'),)
 
     @staticmethod
     async def delete_one(guild: discord.Guild, role: discord.Role) -> None:
-        await SelfRole.delete \
-            .where(SelfRole.guild_id == guild.id) \
-            .where(SelfRole.role_id == role.id) \
-            .gino.status()
+        await SelfRole.delete.where(SelfRole.guild_id == guild.id).where(
+            SelfRole.role_id == role.id
+        ).gino.status()
 
     @staticmethod
     async def get_for_guild(guild: discord.Guild) -> List[SelfRole]:  # noqa
-        return await SelfRole.query \
-            .where(SelfRole.guild_id == guild.id) \
-            .gino.all()
+        return await SelfRole.query.where(SelfRole.guild_id == guild.id).gino.all()

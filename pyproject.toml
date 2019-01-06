@@ -1,0 +1,59 @@
+[tool.poetry]
+name = "bothanasius"
+version = "0.1.0"
+description = ""
+authors = ["Bryan Forbes <bryan@reigndropsfall.net>"]
+license = "BSD-3-Clause"
+
+[tool.poetry.dependencies]
+python = "^3.7"
+aiodns = "^1.1"
+alembic = "^1.0"
+cchardet = "^2.1"
+uvloop = "^0.11.3"
+psycopg2 = "^2.7"
+"botus_receptus" = {rev = "8952c27e1187215a412c59e68c387d0840917f70", git = "https://github.com/bryanforbes/botus_receptus.git", extras = ["gino_typed"]}
+sortedcontainers = "^2.0"
+pendulum = {git = "https://github.com/bryanforbes/pendulum.git", branch = "update-for-pep-561"}
+gino-stubs = {rev = "fcadcd703f602011124ff6c4010be47be02a40df", git = "https://github.com/bryanforbes/gino-stubs.git"}
+sqlalchemy-stubs = {rev = "d05a736c8a4cbd6ac0a1a1d8ddb805435df9adc9", git = "https://github.com/dropbox/sqlalchemy-stubs.git"}
+
+[tool.poetry.dev-dependencies]
+black = "^18.3-alpha.0"
+flake8 = "^3.6"
+flake8-bugbear = "^18.8"
+flake8-per-file-ignores = "^0.7.0"
+flake8-pyi = "^18.1"
+mypy = "^0.650"
+pre-commit = "^1.12"
+pytest = "~4.0.0"
+pytest-asyncio = "^0.9.0"
+pytest-cov = "^2.6"
+pytest-flake8 = "^1.0"
+pytest-mock = "^1.10"
+pytest-mypy = "^0.3.2"
+pytest-xdist = "^1.24"
+
+[tool.poetry.scripts]
+bothanasius = 'bothanasius.run:main'
+
+[tool.black]
+line-length = 88
+py36 = true
+skip-string-normalization = true
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.pytest_cache
+  | \.venv
+  | alembic
+  | htmlcov
+)/
+'''
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"

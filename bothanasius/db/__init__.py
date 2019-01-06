@@ -3,42 +3,44 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Optional, Union, List
 
 import re
+import pendulum
+import datetime
 from sqlalchemy import types
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql.base import ischema_names, PGTypeCompiler
 from sqlalchemy.sql import expression
-from gino import Gino
-from gino.crud import CRUDModel
-
-db = Gino()
 
 if TYPE_CHECKING:
-    Base = CRUDModel
-    IntBase = types.TypeDecorator[int]
+    DateTimeBase = types.TypeDecorator[pendulum.DateTime]
     LtreeBase = types.UserDefinedType['Ltree']
     LQUERYBase = types.TypeEngine[str]
     LTXTQUERYBase = types.TypeEngine[str]
 else:
-    Base = db.Model
-    IntBase = types.TypeDecorator
+    DateTimeBase = types.TypeDecorator
     LtreeBase = types.UserDefinedType
     LQUERYBase = types.TypeEngine
     LTXTQUERYBase = types.TypeEngine
 
+
+class DateTime(DateTimeBase):
+    impl = types.DateTime
+
+    def process_bind_param(
+        self, value: Optional[pendulum.DateTime], dialect: Any
+    ) -> Optional[datetime.datetime]:
+        return (
+            datetime.datetime.fromtimestamp(value.int_timestamp)
+            if value is not None
+            else value
+        )
+
+    def process_result_value(
+        self, value: Optional[datetime.datetime], dialect: Any
+    ) -> Optional[pendulum.DateTime]:
+        return pendulum.instance(value, 'local') if value is not None else value
+
+
 path_matcher = re.compile(r'^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$')
-
-
-class Snowflake(IntBase):
-    impl = types.String
-
-    def process_bind_param(self, value: Any, dialect: Any) -> Optional[str]:
-        return str(value) if value is not None else value
-
-    def process_result_value(self, value: Any, dialect: Any) -> Optional[int]:
-        return int(value) if value is not None else value
-
-    def copy(self, **kwargs: Any) -> Snowflake:  # noqa: F821
-        return Snowflake(self.impl.length)
 
 
 class Ltree(object):
@@ -129,7 +131,9 @@ class Ltree(object):
 
     path: List[str]
 
-    def __init__(self, path_or_ltree: Union[Ltree, str, List[str]]) -> None:  # noqa: F821
+    def __init__(
+        self, path_or_ltree: Union[Ltree, str, List[str]]  # noqa: F821
+    ) -> None:
         if isinstance(path_or_ltree, Ltree):
             self.path = path_or_ltree.path
         else:
@@ -138,10 +142,8 @@ class Ltree(object):
 
             if not isinstance(path_or_ltree, list):
                 raise TypeError(
-                    "Ltree() argument must be a string, list of strings, or an Ltree, not '{0}'"
-                    .format(
-                        type(path_or_ltree).__name__
-                    )
+                    "Ltree() argument must be a string, list of strings, or an Ltree, "
+                    "not '{0}'".format(type(path_or_ltree).__name__)
                 )
 
             self.validate('.'.join(path_or_ltree))
@@ -150,9 +152,7 @@ class Ltree(object):
     @classmethod
     def validate(cls, path: str) -> None:
         if path_matcher.match(path) is None:
-            raise ValueError(
-                "'{0}' is not a valid ltree path.".format(path)
-            )
+            raise ValueError("'{0}' is not a valid ltree path.".format(path))
 
     def __len__(self) -> int:
         return len(self.path)
@@ -160,7 +160,7 @@ class Ltree(object):
     def index(self, other: Union[Ltree, str, List[str]]) -> int:  # noqa: F821
         subpath = Ltree(other).path
         for index, _ in enumerate(self.path):
-            if self.path[index:len(subpath) + index] == subpath:
+            if self.path[index : len(subpath) + index] == subpath:
                 return index
         raise ValueError('subpath not found')
 
@@ -172,7 +172,7 @@ class Ltree(object):
 
             assert Ltree('1.2.3.4.5').descendant_of('1.2.3')
         """
-        subpath = self[:len(Ltree(other))]
+        subpath = self[: len(Ltree(other))]
         return subpath == other
 
     def ancestor_of(self, other: Union[Ltree, str, List[str]]) -> bool:  # noqa: F821
@@ -183,7 +183,7 @@ class Ltree(object):
 
             assert Ltree('1.2.3').ancestor_of('1.2.3.4.5')
         """
-        subpath = Ltree(other)[:len(self)]
+        subpath = Ltree(other)[: len(self)]
         return subpath == self
 
     def __getitem__(self, key: Union[int, slice]) -> Ltree:  # noqa: F821
@@ -191,12 +191,12 @@ class Ltree(object):
             return Ltree(self.path[key])
 
         raise TypeError(
-            'Ltree indices must be integers, not {0}'.format(
-                key.__class__.__name__
-            )
+            'Ltree indices must be integers, not {0}'.format(key.__class__.__name__)
         )
 
-    def lca(self, *others: Union[Ltree, str, List[str]]) -> Optional[Ltree]:  # noqa: F821
+    def lca(
+        self, *others: Union[Ltree, str, List[str]]  # noqa: F821
+    ) -> Optional[Ltree]:  # noqa: F821
         """
         Lowest common ancestor, i.e., longest common prefix of paths
 
@@ -206,10 +206,12 @@ class Ltree(object):
         """
         other_parts = [Ltree(other).path for other in others]
         for index, element in enumerate(self.path):
-            if any((
-                other[index] != element or len(other) <= index + 1
-                for other in other_parts
-            )):
+            if any(
+                (
+                    other[index] != element or len(other) <= index + 1
+                    for other in other_parts
+                )
+            ):
                 if index == 0:
                     return None
                 return Ltree(self.path[0:index])
@@ -305,17 +307,20 @@ class LtreeType(types.Concatenable, LtreeBase):
         def process(value: Any) -> Any:
             if value:
                 return value.path
+
         return process
 
     def result_processor(self, dialect: Any, coltype: Any) -> Any:
         def process(value: Any) -> Any:
             return self._coerce(value)
+
         return process
 
     def literal_processor(self, dialect: Any) -> Any:
         def process(value: Any) -> Any:
             value = value.replace("'", "''")
             return "'%s'" % value
+
         return process
 
     __visit_name__ = 'LTREE'
@@ -324,7 +329,9 @@ class LtreeType(types.Concatenable, LtreeBase):
         if value:
             return Ltree(value)
 
-    def coercion_listener(self, target: Any, value: Any, oldvalue: Any, initiator: Any) -> Any:
+    def coercion_listener(
+        self, target: Any, value: Any, oldvalue: Any, initiator: Any
+    ) -> Any:
         return self._coerce(value)
 
 
@@ -332,6 +339,7 @@ class LQUERY(LQUERYBase):
     """Postresql LQUERY type.
     See :class:`LTREE` for details.
     """
+
     __visit_name__ = 'LQUERY'
 
 
@@ -339,6 +347,7 @@ class LTXTQUERY(LTXTQUERYBase):
     """Postresql LTXTQUERY type.
     See :class:`LTREE` for details.
     """
+
     __visit_name__ = 'LTXTQUERY'
 
 

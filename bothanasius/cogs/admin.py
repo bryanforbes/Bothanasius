@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterable, cast
+from typing import Iterable, cast
 
 import attr
 import logging
@@ -19,7 +19,6 @@ log = logging.getLogger(__name__)
 @attr.s(slots=True, auto_attribs=True)
 class Administration(object):
     bot: Bothanasius
-    __weakref__: Any = attr.ib(init=False, hash=False, repr=False, cmp=False)
 
     async def on_command_completion(self, ctx: Context) -> None:
         if not ctx.has_error:
@@ -35,7 +34,7 @@ class Administration(object):
 
     @commands.command()
     async def prefix(self, ctx: GuildContext, prefix: str) -> None:
-        await self.bot.set_prefix(ctx, ctx.guild, prefix)
+        await self.bot.set_prefix(ctx.guild, prefix)
         await ctx.send_response(f'Prefix set to {formatting.inline_code(prefix)}')
 
     @commands.command()
@@ -53,12 +52,16 @@ class Administration(object):
         prefs = await GuildPrefs.get(ctx.guild.id)
 
         if prefs:
-            roles: Iterable[discord.Role] = filter(lambda role: role.id in cast(GuildPrefs, prefs).admin_roles,
-                                                   ctx.guild.roles)
+            roles: Iterable[discord.Role] = filter(
+                lambda role: role.id in cast(GuildPrefs, prefs).admin_roles,
+                ctx.guild.roles,
+            )
         else:
             roles = []
 
-        await ctx.send_response('\n'.join([role.name for role in roles]), title='Administration Roles')
+        await ctx.send_response(
+            '\n'.join([role.name for role in roles]), title='Administration Roles'
+        )
 
     @commands.command()
     async def addmodrole(self, ctx: GuildContext, role: discord.Role) -> None:
@@ -75,12 +78,16 @@ class Administration(object):
         prefs = await GuildPrefs.get(ctx.guild.id)
 
         if prefs:
-            roles: Iterable[discord.Role] = filter(lambda role: role.id in cast(GuildPrefs, prefs).mod_roles,
-                                                   ctx.guild.roles)
+            roles: Iterable[discord.Role] = filter(
+                lambda role: role.id in cast(GuildPrefs, prefs).mod_roles,
+                ctx.guild.roles,
+            )
         else:
             roles = []
 
-        await ctx.send_response('\n'.join([role.name for role in roles]), title='Moderation Roles')
+        await ctx.send_response(
+            '\n'.join([role.name for role in roles]), title='Moderation Roles'
+        )
 
 
 def setup(bot: Bothanasius) -> None:

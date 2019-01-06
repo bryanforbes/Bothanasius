@@ -5,9 +5,11 @@
 __pycache__/
 /htmlcov/
 /venv/
+/bothanasius.egg-info/
 .coverage*
 .testmondata
 config.json
 config.ini
+config.toml
 *.pyc
 /bothanasius.log

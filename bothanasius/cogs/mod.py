@@ -1,108 +1,29 @@
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Optional,
-    Union,
-    Callable,
-    Coroutine,
-    Tuple,
-    Type,
-    List,
-    overload,
-)
+from typing import Optional, Union, overload
 
-import attr
 import discord
 import logging
 import pendulum
 
-from more_itertools import partition
 from discord.ext import commands
 from botus_receptus.formatting import EmbedPaginator, underline, bold, strikethrough
 
-from ..bothanasius import Bothanasius
-from ..db.admin import GuildPrefs
-from ..db.mod import DelayedMute, Warning
+from ..bothanasius import Bothanasius, DelayedAction
+from ..db.admin import GuildPrefs, InviteArgumentParser
+from ..db.mod import Warning
 from ..context import Context, GuildContext
+from ..checks import check_mod_only
 
 log = logging.getLogger(__name__)
 
 
-@attr.s(slots=True, auto_attribs=True, frozen=True)
-class Unmute(object):
-    guild_id: int
-    member_id: int
-    created_at: pendulum.DateTime
-    end_time: pendulum.DateTime
-    callback: Callable[['Unmute'], Coroutine[Any, Any, None]] = attr.ib(repr=False)
+class Moderation(commands.Cog[Context]):
+    def __init__(self, bot: Bothanasius) -> None:
+        self.bot = bot
 
-    @property
-    def run(self) -> Callable[['Unmute'], Coroutine[Any, Any, None]]:
-        return self.callback
-
-    @property
-    def id_key(self) -> Tuple[Type['Unmute'], Tuple[int, int]]:
-        return Unmute, (self.guild_id, self.member_id)
-
-
-@attr.s(slots=True, auto_attribs=True)
-class Moderation(object):
-    bot: Bothanasius
-
-    async def __local_check(self, ctx: Context) -> bool:
-        if ctx.guild is None:
-            return False
-        if ctx.guild.owner != ctx.author and not await ctx.has_mod_role():
-            return False
-
-        return True
-
-    async def __run_action(self, action: Unmute) -> None:
-        await DelayedMute.delete_one(
-            guild_id=action.guild_id, member_id=action.member_id
-        )
-        await self.__unmute(
-            action.guild_id,
-            action.member_id,
-            (action.end_time - action.created_at).total_seconds(),
-        )
-
-    async def __get_delayed_actions(self) -> List[Unmute]:
-        delayed_mutes = await DelayedMute.get_all_ascending()
-
-        now = pendulum.now()
-
-        def predicate(delay: DelayedMute) -> bool:
-            return delay.end_time <= now
-
-        delays, unmutes = partition(predicate, delayed_mutes)
-
-        await DelayedMute.delete_prior_to(now)
-
-        for unmute in unmutes:
-            await self.__unmute(unmute.guild_id, unmute.member_id, unmute.seconds)
-
-        return [
-            Unmute(
-                guild_id=delay.guild_id,
-                member_id=delay.member_id,
-                created_at=pendulum.instance(delay.created_at),
-                end_time=pendulum.instance(delay.end_time),
-                callback=self.__run_action,
-            )
-            for delay in delays
-        ]
-
-    async def __get_mute_role(self, guild: discord.Guild) -> Optional[discord.Role]:
-        guild_prefs = await GuildPrefs.query.where(
-            GuildPrefs.guild_id == guild.id
-        ).gino.first()
-        return (
-            guild.get_role(guild_prefs.mute_role)
-            if guild_prefs is not None
-            else discord.utils.get(guild.roles, name='bothanasius-mute')
-        )
+    async def cog_check(self, ctx: Context) -> bool:
+        return await check_mod_only(ctx)
 
     @overload
     async def __unmute(self, guild_id: int, member_id: int, seconds: float) -> None:
@@ -128,7 +49,8 @@ class Moderation(object):
             )
 
             if member is not None:
-                role = await self.__get_mute_role(guild)
+                prefs = await GuildPrefs.for_guild(guild)
+                role = prefs.guild_mute_role
                 if role is not None:
                     if seconds is None:
                         reason = 'after bot restart'
@@ -137,9 +59,6 @@ class Moderation(object):
                     await member.remove_roles(role, reason=f'Unmuted {reason}')
                     log.info(f'{member_id} has been unmuted {reason}')
 
-    async def on_ready(self) -> None:
-        pass
-
     @commands.command()
     async def mute(
         self,
@@ -147,7 +66,7 @@ class Moderation(object):
         members: commands.Greedy[discord.Member],
         minutes: Optional[int] = None,
     ) -> None:
-        role = await self.__get_mute_role(ctx.guild)
+        role = (await ctx.guild_prefs).guild_mute_role
 
         if role is not None:
             if minutes is not None:
@@ -162,7 +81,7 @@ class Moderation(object):
                 except discord.Forbidden:
                     await ctx.send_error(
                         f'Could not mute {member.mention}. Please make sure the '
-                        '"Bothanasius" role is higher than the "bothanasius-mute" '
+                        '`Bothanasius` role is higher than the `{role.name}` '
                         'role.',
                         title='Permissions incorrect',
                     )
@@ -170,38 +89,22 @@ class Moderation(object):
                     await ctx.send_response(f'{member.mention} has been muted')
 
                     if minutes is None:
-                        self.bot.delays.find_and_remove(
-                            Unmute, guild_id=ctx.guild.id, member_id=member.id
-                        )
-                        await DelayedMute.delete_one(
-                            guild_id=ctx.guild.id, member_id=member.id
-                        )
+                        await self.bot.remove_action('unmute', ctx.guild.id, member.id)
                     else:
-                        self.bot.delays.add(
-                            Unmute(
-                                guild_id=ctx.guild.id,
-                                member_id=member.id,
-                                created_at=now,
-                                end_time=end_time,
-                                callback=self.__run_action,
-                            )
-                        )
-                        await DelayedMute.create_or_update(
-                            guild=ctx.guild,
-                            member=member,
-                            end_time=end_time,
-                            created_at=now,
+                        await self.bot.create_or_update_action(
+                            end_time,
+                            'unmute',
+                            ctx.guild.id,
+                            member.id,
+                            moderator_id=ctx.author.id,
                         )
 
     @commands.command()
     async def unmute(self, ctx: GuildContext, member: discord.Member) -> None:
-        role = await self.__get_mute_role(ctx.guild)
+        role = (await ctx.guild_prefs).guild_mute_role
 
         if role is not None:
-            self.bot.delays.find_and_remove(
-                Unmute, guild_id=ctx.guild.id, member_id=member.id
-            )
-            await DelayedMute.delete_one(guild_id=ctx.guild.id, member_id=member.id)
+            await self.bot.remove_action('unmute', ctx.guild.id, member.id)
 
             try:
                 await member.remove_roles(
@@ -210,11 +113,52 @@ class Moderation(object):
             except discord.Forbidden:
                 await ctx.send_error(
                     f'Could not unmute {member.mention}. Please make sure the '
-                    '"Bothanasius" role is higher than the "bothanasius-mute" role.',
+                    '`Bothanasius` role is higher than the `{role.name}` role.',
                     title='Permissions incorrect',
                 )
             else:
                 await ctx.send_response(f'{member.mention} has been unmuted')
+
+    @commands.Cog.listener()
+    async def on_unmute_action_complete(self, action: DelayedAction) -> None:
+        guild_id, member_id = action.args  # type: int, int
+        mod_id = action.kwargs['moderator_id']
+
+        guild = self.bot.get_guild(guild_id)
+
+        if guild is None:
+            return
+
+        member = guild.get_member(member_id)
+        moderator: Optional[Union[discord.User, discord.Member]] = guild.get_member(
+            mod_id
+        )
+
+        if member is None:
+            return
+
+        if moderator is None:
+            try:
+                moderator = await self.bot.fetch_user(mod_id)
+            except Exception:
+                moderator_str = f'Moderator ID {mod_id}'
+            else:
+                moderator_str = f'{moderator} (ID: {mod_id})'
+        else:
+            moderator_str = f'{moderator} (ID: {mod_id})'
+
+        prefs = await GuildPrefs.for_guild(guild)
+        role = prefs.guild_mute_role
+
+        if role is not None:
+            try:
+                await member.remove_roles(
+                    role,
+                    reason=f'Automatic unmute from mute on {action.created_at} '
+                    f'by {moderator_str}',
+                )
+            except discord.Forbidden:
+                pass
 
     @commands.command()
     async def warn(
@@ -315,9 +259,54 @@ class Moderation(object):
         await ctx.send_response(f'{user.name} ({user}) has been banned')
 
     @commands.command()
-    async def invite(self, ctx: GuildContext, user: discord.User) -> None:
-        invite = await ctx.channel.create_invite()
-        await ctx.send(invite.url)
+    async def invite(
+        self,
+        ctx: GuildContext,
+        user: Optional[discord.User] = None,
+        *,
+        options: str = '',
+    ) -> None:
+        """Create an invite
+
+        The following options are valid:
+
+        `--max-age`: How long until an invite expires (0 for never; in minutes or
+                     formatted string)
+        `--max-uses`: Maximum number of uses (0 for unlimited)
+        `--temporary` / `--not-temporary`: Grant temporary membership
+        `--unique` / `--not-unique`: Create a unique invite URL every time
+
+        Max age formating:
+
+        `--max-age` accepts a string containing multiple sets of numbers followed by a
+        unit identifier. Sets can have spaces between them. The unit identifiers are as
+        follows:
+
+        s - seconds
+        m - minutes
+        h - hours
+        d - days
+        w - weeks
+        y - years
+
+        Examples:
+
+        1m30s - 1 minute and 30 seconds
+        1d 5h 42s - one day, 5 hours, and 42 seconds
+        """
+
+        parsed = await InviteArgumentParser.parse(
+            ctx, (await ctx.guild_prefs).invite_prefs, options
+        )
+
+        if parsed is not None:
+            invite = await ctx.channel.create_invite(
+                reason=f'Requested by {ctx.author}', **parsed
+            )
+            if user is None:
+                await ctx.send(invite.url)
+            else:
+                await user.send(invite.url)
 
 
 def setup(bot: Bothanasius) -> None:

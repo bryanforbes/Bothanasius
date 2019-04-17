@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from typing import TYPE_CHECKING, List, Optional, Union
 from botus_receptus import PaginatedContext, EmbedContext
 from botus_receptus.context import (
     FooterData,
@@ -15,11 +15,11 @@ from .db.admin import GuildPrefs
 import discord
 
 if TYPE_CHECKING:
-    from .bothanasius import Bothanasius  # noqa: F401
+    from .bothanasius import Bothanasius
 
 
 class Context(PaginatedContext, EmbedContext):
-    bot: 'Bothanasius'
+    bot: Bothanasius
     has_error: bool = False
 
     async def send_error(
@@ -92,33 +92,11 @@ class Context(PaginatedContext, EmbedContext):
             nonce=nonce,
         )
 
-    async def has_admin_role(self) -> bool:
-        if self.guild is None:
-            return False
+    @discord.utils.cached_property
+    async def guild_prefs(self) -> GuildPrefs:
+        assert self.guild is not None
 
-        author = cast(discord.Member, self.author)
-        role_ids = [str(role.id) for role in author.roles]
-
-        return (
-            await GuildPrefs.query.where(GuildPrefs.guild_id == self.guild.id)
-            .where(GuildPrefs.admin_roles.overlap(role_ids))
-            .gino.first()
-            is not None
-        )
-
-    async def has_mod_role(self) -> bool:
-        if self.guild is None:
-            return False
-
-        author = cast(discord.Member, self.author)
-        role_ids = [str(role.id) for role in author.roles]
-
-        return (
-            await GuildPrefs.query.where(GuildPrefs.guild_id == self.guild.id)
-            .where((GuildPrefs.admin_roles + GuildPrefs.mod_roles).overlap(role_ids))
-            .gino.first()
-            is not None
-        )
+        return await GuildPrefs.for_guild(self.guild)
 
 
 class GuildContext(Context, BaseGuildContext):

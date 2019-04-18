@@ -3,7 +3,7 @@ from __future__ import annotations
 from botus_receptus import abc, Config
 from botus_receptus.gino import Bot
 from discord.ext import commands
-from typing import Any, Optional, Union, Dict, overload
+from typing import Any, Optional, Union, Dict, Tuple, overload
 from typing_extensions import Final
 
 import asyncio
@@ -67,11 +67,7 @@ class Bothanasius(
         await self.invoke(ctx)
 
     async def close(self) -> None:
-        if self.is_closed():
-            return
-
         self._task.cancel()
-
         await super().close()
 
     async def get_prefix(self, message: discord.Message) -> str:
@@ -79,6 +75,25 @@ class Bothanasius(
             return self.default_prefix
 
         return self.prefix_map.get(message.guild.id, self.default_prefix)
+
+    def get_guild_member(
+        self, guild_id: int, member_id: int
+    ) -> Union[
+        Tuple[None, None],
+        Tuple[discord.Guild, Optional[discord.Member]],
+        Tuple[discord.Guild, discord.Member],
+    ]:
+        guild = self.get_guild(guild_id)
+
+        if guild is None:
+            return None, None
+
+        member = guild.get_member(member_id)
+
+        if member is None:
+            return guild, None
+
+        return guild, member
 
     async def __action_loop(self) -> None:
         try:
@@ -214,32 +229,55 @@ class Bothanasius(
         else:
             await super().on_command_error(ctx, error)
 
+    async def __setup_role(
+        self,
+        guild: discord.Guild,
+        *,
+        name: str,
+        permissions: Dict[str, bool],
+        reason: str,
+    ) -> discord.Role:
+        role = discord.utils.get(guild.roles, name=name)
+
+        if role is None:
+            role_perms = discord.Permissions()
+            role_perms.update(**permissions)
+
+            role = await guild.create_role(
+                name=name, permissions=role_perms, reason=reason
+            )
+
+        return role
+
     async def __setup_guild(
         self, guild: discord.Guild, *, joined: bool = False
     ) -> None:
-        role = discord.utils.get(guild.roles, name='Muted')
-
-        if role is None:
-            permissions = discord.Permissions()
-            permissions.update(
+        mute_role = await self.__setup_role(
+            guild,
+            name='Muted',
+            permissions=dict(
                 add_reactions=False,
                 external_emojis=False,
                 send_messages=False,
                 speak=False,
-            )
+            ),
+            reason='Bothanasius set up mute role',
+        )
 
-            role = await guild.create_role(
-                name='Muted',
-                permissions=permissions,
-                reason='Added Bothanasius to the server',
-            )
+        time_out_role = await self.__setup_role(
+            guild,
+            name='Time Out',
+            permissions=dict(read_messages=False),
+            reason='Bothanasius set up time out role',
+        )
 
         if joined:
             await GuildPrefs.create_or_update(
                 guild_id=guild.id,
                 prefix=self.default_prefix,
-                mute_role=role.id,
-                set_=('prefix', 'mute_role'),
+                mute_role=mute_role.id,
+                time_out_role=time_out_role.id,
+                set_=('prefix', 'mute_role', 'time_out_role'),
             )
 
     async def on_guild_join(self, guild: discord.Guild) -> None:

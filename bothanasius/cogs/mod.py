@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Union, overload
+from typing import Optional, Union
 
 import discord
 import logging
@@ -25,46 +25,9 @@ class Moderation(commands.Cog[Context]):
     async def cog_check(self, ctx: Context) -> bool:
         return await check_mod_only(ctx)
 
-    @overload
-    async def __unmute(self, guild_id: int, member_id: int, seconds: float) -> None:
-        ...
-
-    @overload  # noqa: F811
-    async def __unmute(
-        self, guild_id: discord.Guild, member_id: discord.Member, seconds: float
-    ) -> None:
-        ...
-
-    async def __unmute(  # noqa: F811
-        self,
-        guild_id: Union[int, discord.Guild],
-        member_id: Union[int, discord.Member],
-        seconds: float,
-    ) -> None:
-        guild = self.bot.get_guild(guild_id) if isinstance(guild_id, int) else guild_id
-
-        if guild is not None:
-            member = (
-                guild.get_member(member_id) if isinstance(member_id, int) else member_id
-            )
-
-            if member is not None:
-                prefs = await GuildPrefs.for_guild(guild)
-                role = prefs.guild_mute_role
-                if role is not None:
-                    if seconds is None:
-                        reason = 'after bot restart'
-                    else:
-                        reason = f'after {seconds} seconds'
-                    await member.remove_roles(role, reason=f'Unmuted {reason}')
-                    log.info(f'{member_id} has been unmuted {reason}')
-
     @commands.command()
     async def mute(
-        self,
-        ctx: GuildContext,
-        members: commands.Greedy[discord.Member],
-        minutes: Optional[int] = None,
+        self, ctx: GuildContext, member: discord.Member, minutes: Optional[int] = None
     ) -> None:
         role = (await ctx.guild_prefs).guild_mute_role
 
@@ -73,69 +36,98 @@ class Moderation(commands.Cog[Context]):
                 now = pendulum.now()
                 end_time = now.add(minutes=minutes)
 
-            for member in members:
-                try:
-                    await member.add_roles(
-                        role, reason=f'Muted by {ctx.message.author}'
-                    )
-                except discord.Forbidden:
-                    await ctx.send_error(
-                        f'Could not mute {member.mention}. Please make sure the '
-                        '`Bothanasius` role is higher than the `{role.name}` '
-                        'role.',
-                        title='Permissions incorrect',
-                    )
-                else:
-                    await ctx.send_response(f'{member.mention} has been muted')
-
-                    if minutes is None:
-                        await self.bot.remove_action('unmute', ctx.guild.id, member.id)
-                    else:
-                        await self.bot.create_or_update_action(
-                            end_time,
-                            'unmute',
-                            ctx.guild.id,
-                            member.id,
-                            moderator_id=ctx.author.id,
-                        )
-
-    @commands.command()
-    async def unmute(self, ctx: GuildContext, member: discord.Member) -> None:
-        role = (await ctx.guild_prefs).guild_mute_role
-
-        if role is not None:
-            await self.bot.remove_action('unmute', ctx.guild.id, member.id)
-
             try:
-                await member.remove_roles(
-                    role, reason=f'Unmuted by {ctx.message.author}'
-                )
+                await member.add_roles(role, reason=f'Muted by {ctx.message.author}')
             except discord.Forbidden:
+                log.error(
+                    f'Could not mute {member.mention} in {ctx.guild.name} '
+                    f'({ctx.guild.id})'
+                )
                 await ctx.send_error(
-                    f'Could not unmute {member.mention}. Please make sure the '
-                    '`Bothanasius` role is higher than the `{role.name}` role.',
+                    f'Could not mute {member.mention}. Please make sure the '
+                    '`Bothanasius` role is higher than the `{role.name}` '
+                    'role.',
                     title='Permissions incorrect',
                 )
             else:
-                await ctx.send_response(f'{member.mention} has been unmuted')
+                await ctx.send_response(f'{member.mention} has been muted')
+
+                if minutes is None:
+                    await self.bot.remove_action('unmute', ctx.guild.id, member.id)
+                else:
+                    await self.bot.create_or_update_action(
+                        end_time,
+                        'unmute',
+                        ctx.guild.id,
+                        member.id,
+                        moderator_id=ctx.author.id,
+                        channel_id=ctx.channel.id,
+                    )
+
+    async def __unmute(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        channel: Optional[discord.TextChannel],
+        reason: str,
+    ) -> bool:
+        prefs = await GuildPrefs.for_guild(guild)
+        role = prefs.guild_mute_role
+
+        if role is not None:
+            await self.bot.remove_action('unmute', guild.id, member.id)
+
+            try:
+                await member.remove_roles(role, reason=reason)
+            except discord.Forbidden:
+                log.error(
+                    f'Could not unmute {member.mention} in {guild.name} '
+                    f'({guild.id})'
+                )
+
+                if channel:
+                    await channel.send(
+                        embed=discord.Embed(
+                            title='Permissions incorrect',
+                            color=discord.Color.red(),
+                            description=f'Could not unmute {member.mention}. Please '
+                            'make sure the `Bothanasius` role is higher than the '
+                            f'`{role.name}` role.',
+                        )
+                    )
+
+                return True
+            else:
+                if channel:
+                    await channel.send(
+                        embed=discord.Embed(
+                            color=discord.Color.green(),
+                            description=f'{member.mention} has been unmuted',
+                        )
+                    )
+
+        return False
+
+    @commands.command()
+    async def unmute(self, ctx: GuildContext, member: discord.Member) -> None:
+        ctx.has_error = await self.__unmute(
+            ctx.guild, member, ctx.channel, f'Unmuted by {ctx.author}'
+        )
 
     @commands.Cog.listener()
     async def on_unmute_action_complete(self, action: DelayedAction) -> None:
         guild_id, member_id = action.args  # type: int, int
-        mod_id = action.kwargs['moderator_id']
+        mod_id: int = action.kwargs['moderator_id']
+        channel_id: int = action.kwargs['channel_id']
 
-        guild = self.bot.get_guild(guild_id)
+        guild, member = self.bot.get_guild_member(guild_id, member_id)
 
-        if guild is None:
+        if guild is None or member is None:
             return
 
-        member = guild.get_member(member_id)
         moderator: Optional[Union[discord.User, discord.Member]] = guild.get_member(
             mod_id
         )
-
-        if member is None:
-            return
 
         if moderator is None:
             try:
@@ -147,18 +139,143 @@ class Moderation(commands.Cog[Context]):
         else:
             moderator_str = f'{moderator} (ID: {mod_id})'
 
+        channel = self.bot.get_channel(channel_id) or guild.system_channel
+
+        await self.__unmute(
+            guild,
+            member,
+            channel if isinstance(channel, discord.TextChannel) else None,
+            f'Automatic unmute from mute on {action.created_at} by {moderator_str}',
+        )
+
+    async def __timein(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        channel: Optional[discord.TextChannel],
+        reason: str,
+    ) -> bool:
         prefs = await GuildPrefs.for_guild(guild)
-        role = prefs.guild_mute_role
+        role = prefs.guild_time_out_role
 
         if role is not None:
+            await self.bot.remove_action('time_in', guild.id, member.id)
+
             try:
-                await member.remove_roles(
-                    role,
-                    reason=f'Automatic unmute from mute on {action.created_at} '
-                    f'by {moderator_str}',
+                await member.remove_roles(role, reason=reason)
+            except discord.Forbidden:
+                log.error(
+                    f'Could not time in {member.mention} in {guild.name} '
+                    f'({guild.id})'
+                )
+
+                if channel:
+                    await channel.send(
+                        embed=discord.Embed(
+                            title='Permissions incorrect',
+                            color=discord.Color.red(),
+                            description=f'Could not time in {member.mention}. Please '
+                            'make sure the `Bothanasius` role is higher than the '
+                            f'`{role.name}` role.',
+                        )
+                    )
+
+                return True
+            else:
+                if channel:
+                    await channel.send(
+                        embed=discord.Embed(
+                            color=discord.Color.green(),
+                            description=f'Welcome back, {member.mention}',
+                        )
+                    )
+
+        return False
+
+    @commands.command()
+    async def timeout(
+        self,
+        ctx: GuildContext,
+        member: discord.Member,
+        minutes: Optional[int] = None,
+        *,
+        reason: Optional[str] = None,
+    ) -> None:
+        role = (await ctx.guild_prefs).guild_time_out_role
+
+        if role is not None:
+            if minutes is not None:
+                now = pendulum.now()
+                end_time = now.add(minutes=minutes)
+
+            try:
+                await member.add_roles(
+                    role, reason=f'Timed out by {ctx.message.author}'
                 )
             except discord.Forbidden:
-                pass
+                log.error(
+                    f'Could not time out {member.mention} in {ctx.guild.name} '
+                    f'({ctx.guild.id})'
+                )
+                await ctx.send_error(
+                    f'Could not time out {member.mention}. Please make sure the '
+                    '`Bothanasius` role is higher than the `{role.name}` '
+                    'role.',
+                    title='Permissions incorrect',
+                )
+            else:
+                if minutes is None:
+                    await self.bot.remove_action('time_in', ctx.guild.id, member.id)
+                else:
+                    await self.bot.create_or_update_action(
+                        end_time,
+                        'time_in',
+                        ctx.guild.id,
+                        member.id,
+                        moderator_id=ctx.author.id,
+                        channel_id=ctx.channel.id,
+                    )
+
+    @commands.command(aliases=['untimeout'])
+    async def timein(self, ctx: GuildContext, member: discord.Member) -> None:
+        ctx.has_error = await self.__timein(
+            ctx.guild, member, ctx.channel, f'Timed in by {ctx.author}'
+        )
+
+    @commands.Cog.listener()
+    async def on_time_in_action_complete(self, action: DelayedAction) -> None:
+        guild_id, member_id = action.args  # type: int, int
+        mod_id: int = action.kwargs['moderator_id']
+        channel_id: int = action.kwargs['channel_id']
+
+        guild, member = self.bot.get_guild_member(guild_id, member_id)
+
+        if guild is None or member is None:
+            return
+
+        moderator: Optional[Union[discord.User, discord.Member]] = guild.get_member(
+            mod_id
+        )
+
+        if moderator is None:
+            try:
+                moderator = await self.bot.fetch_user(mod_id)
+            except Exception:
+                moderator_str = f'Moderator ID {mod_id}'
+            else:
+                moderator_str = f'{moderator} (ID: {mod_id})'
+        else:
+            moderator_str = f'{moderator} (ID: {mod_id})'
+
+        channel = self.bot.get_channel(channel_id) or guild.system_channel
+
+        await self.__unmute(
+            guild,
+            member,
+            channel if isinstance(channel, discord.TextChannel) else None,
+            f'Automatic time in from time out on {action.created_at} by '
+            f'{moderator_str}',
+        )
 
     @commands.command()
     async def warn(

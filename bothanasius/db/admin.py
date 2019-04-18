@@ -94,6 +94,8 @@ class GuildPrefs(Base):
     temporary = db.BooleanProperty(prop_name='invite_prefs', default=False)
     unique = db.BooleanProperty(prop_name='invite_prefs', default=True)
 
+    time_out_role = db.Column(Snowflake())
+
     __guild: discord.Guild
 
     @property
@@ -129,6 +131,15 @@ class GuildPrefs(Base):
             discord.utils.get(self.__guild.roles, name='Muted')
             if mute_role is None
             else mute_role
+        )
+
+    @property
+    def guild_time_out_role(self) -> Optional[discord.Role]:
+        time_out_role = self.__guild.get_role(self.time_out_role or -1)
+        return (
+            discord.utils.get(self.__guild.roles, name='Time Out')
+            if time_out_role is None
+            else time_out_role
         )
 
     async def add_admin_role(self, role: discord.Role) -> None:
